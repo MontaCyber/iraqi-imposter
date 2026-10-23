@@ -5,6 +5,9 @@ on:
   push:
     branches: [main, fix/deep-audit-v15-20261023]
   workflow_dispatch:
+concurrency:
+  group: game-qa-${{ github.ref }}
+  cancel-in-progress: true
 permissions:
   contents: read
 jobs:
