@@ -225,7 +225,7 @@
   }
   function endDiscussion(state,confirmed,now){
     const s=copyActive(state,["talk"]);
-    const enough=s.active.askTurn>=Math.min(s.roster.length,3),expired=now>=s.active.deadline;
+    const enough=s.active.askTurn>=s.roster.length,expired=now>=s.active.deadline;
     if(!enough&&!expired&&!confirmed)throw Error("Discussion needs confirmation");
     s.active.phase="guess-pass";return s;
   }
