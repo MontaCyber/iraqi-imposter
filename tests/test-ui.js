@@ -76,6 +76,8 @@ test("pass/reveal strictly hides impostor hints from ordinary players",()=>{
  }
  assert.equal(h.getState().active.phase,"talk");
  assert.ok(h.app.html.includes("السؤال 1"));
+ assert.equal(h.app.html.includes("إنهاء مبكر"),true);
+ for(let i=1;i<5;i++)h.app.fireAction("nextQuestion");
  h.app.fireAction("endDiscussion");
  assert.equal(h.getState().active.phase,"guess-pass");
  h.app.fireAction("showGuess");
@@ -93,6 +95,7 @@ test("refresh recovers active game but never displays the previously revealed ca
  const word=h.getState().active.word;
  h.app.fireAction("reveal");
  assert.equal(h.getState().active.phase,"reveal");
+ h.sendWindowEvent("pagehide"); // Reload releases the old document's lease.
  const after=launch({localStorage:shared,sessionStorage:tab});
  assert.equal(after.getState().active.phase,"pass");
  assert.equal(after.getState().active.word,word);
