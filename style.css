@@ -30,3 +30,11 @@ summary{cursor:pointer;padding:8px 0}
 }
 @media(prefers-reduced-motion:reduce){*{animation-duration:0.01ms!important;transition-duration:0.01ms!important}}
 
+
+
+.word-group{margin:12px 0;padding:10px 8px;border-bottom:1px solid #41506a;text-align:right}
+.word-group h3{font-size:16px;margin:6px 0;color:#e2e8f0}
+.review-questions{text-align:right;line-height:1.85;font-size:14px;color:#e2e8f0;padding-right:26px;margin:8px 0}
+.review-questions li{margin:5px 0;overflow-wrap:anywhere}
+#backupFile{font-size:13px;direction:rtl;max-width:100%}
+#backupFile::file-selector-button{border-radius:8px;padding:8px;color:#172033;background:#ffda80;border:0;font-weight:bold;cursor:pointer}
