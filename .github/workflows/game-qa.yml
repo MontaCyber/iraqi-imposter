@@ -45,7 +45,6 @@ jobs:
 
   webkit-smoke:
     name: Browser compatibility — WebKit (additional confidence)
-    continue-on-error: true
     runs-on: ubuntu-latest
     timeout-minutes: 12
     container: mcr.microsoft.com/playwright:v1.56.1-noble
@@ -60,7 +59,7 @@ jobs:
   publish:
     name: Publish only after complete QA
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    needs: [test, browser-smoke]
+    needs: [test, browser-smoke, webkit-smoke]
     runs-on: ubuntu-latest
     timeout-minutes: 8
     permissions:
