@@ -48,7 +48,7 @@ function legacyScores(){try{return safeParse(localStorage.getItem("imposterScore
 function load(){
  const saved=(()=>{try{return safeParse(localStorage.getItem(KEY))}catch{return null}})();
  state=core.initial(bank,saved,legacyCycle(),legacyScores());
- if(!saved||saved.version!==core.VERSION)persist();
+ if(!locked)persist(); // Persist normalized state and re-hide secret cards after refresh.
  mode=state.active?"game":"setup";
 }
 function rootError(msg){
@@ -61,7 +61,7 @@ try{core.catalogue(bank);takeOwnership(false);load()}
 catch(e){rootError("معلومات اللعبة المحفوظة غير صالحة. جرّب إعادة التحميل. "+e.message);return}
 function show(text){notice=text;render()}
 function commit(next){
- state=next;persist();mode=state.active?"game":"setup";render();
+ state=next;persist();mode=state.active?"game":"setup";remainingPrev=-1;render();
 }
 function commitError(fn){
  try{fn()}catch(e){show(e.message||"صار خطأ غير متوقع")}
@@ -295,7 +295,7 @@ root.setInterval(()=>{
   if(s!==remainingPrev){
     const el=document.getElementById("clock");
     if(el)el.textContent=formatSeconds(s);
-    if(s===0&&remainingPrev>0)render();
+    if(s===0&&remainingPrev!==0)render(); // Handles phone sleep that skips directly to zero.
     remainingPrev=s;
   }
  }
