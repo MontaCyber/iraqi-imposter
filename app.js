@@ -70,7 +70,7 @@ function load(){
 function rootError(msg){
  if(!app)return;
  app.innerHTML='<div class="panel"><h2 tabindex="-1">تعذّر تحميل اللعبة</h2><p>'+esc(msg||"ملفات اللعبة ما تحمّلت بشكل صحيح")+'</p><button type="button" id="reloadGame">إعادة المحاولة</button></div>';
- app.querySelector("#reloadGame")?.addEventListener("click",()=>root.location.reload());
+ app.querySelector("#reloadGame")?.addEventListener?.("click",()=>root.location.reload());
 }
 if(!app)return;
 if(!core||!bank){rootError("افحص الاتصال بالإنترنت وحاول تحدث الصفحة. إذا كنت تستعملها أول مرة، افتحها مع الإنترنت.");return}
