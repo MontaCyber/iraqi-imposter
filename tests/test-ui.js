@@ -157,3 +157,45 @@ test("clock uses saved deadline and expire/extend flow",()=>{
  h.app.fireAction("extend");
  assert.equal(h.getState().active.deadline,deadline+61000);
 });
+
+
+test("legacy score migration occurs once; clearing scores stays cleared after start and reload",()=>{
+ const legacy=memory({imposterScores:JSON.stringify({"اللاعب 1":14,"اللاعب 2":8})});
+ const h=launch({localStorage:legacy});
+ assert.equal(h.getState().scores.p1,14);
+ h.app.fireAction("clearScores");
+ assert.ok(Object.values(h.getState().scores).every(v=>v===0));
+ h.app.fireAction("start");
+ assert.ok(Object.values(h.getState().scores).every(v=>v===0));
+ h.sendWindowEvent("pagehide");
+ const next=launch({localStorage:legacy});
+ assert.ok(Object.values(next.getState().scores).every(v=>v===0));
+});
+test("duplicated sessionStorage tab IDs do not let a stale tab overwrite word history",()=>{
+ const storage=memory(),oldTab=memory({imposterTabV4:"copied-id"});
+ const a=launch({localStorage:storage,sessionStorage:oldTab}),clone=memory({imposterTabV4:"copied-id"});
+ a.app.fireAction("start");
+ const previous=a.getState().active.word;
+ const b=launch({localStorage:storage,sessionStorage:clone});
+ assert.ok(b.app.html.includes("اللعبة مفتوحة بتبويب ثاني"));
+ b.app.fireAction("start");
+ assert.ok(b.getState().used.includes(previous));
+ b.app.fireAction("takeLock");
+ assert.ok(b.getState().used.includes(previous));
+ a.app.fireAction("abandon");
+ assert.ok(storage.getItem("imposterGameV4").includes(previous));
+});
+test("word editor warns before one exclusion disables a whole group",()=>{
+ const confirmations=[],h=launch({confirmations});
+ h.app.fireAction("review");
+ h.app.fireAction("toggleWord",{"data-word":"قطو"});
+ assert.ok(confirmations.some(s=>s.includes("٦ خيارات")));
+ assert.equal(h.getState().blocked.includes("قطو"),true);
+});
+test("normal discussion requires complete question cycle; early exit is explicit",()=>{
+ const h=launch();
+ h.app.fireAction("start");for(let i=0;i<5;i++){h.app.fireAction("reveal");h.app.fireAction("next")}
+ assert.ok(h.app.html.includes("إنهاء مبكر"));
+ h.app.fireAction("endDiscussion");assert.equal(h.getState().active.phase,"talk");
+ h.app.fireAction("forceEnd");assert.equal(h.getState().active.phase,"guess-pass");
+});
