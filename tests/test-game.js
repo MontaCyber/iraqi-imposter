@@ -8,6 +8,7 @@ const core=require("../game-core.js");
 const bankContext={window:{}};
 vm.runInNewContext(fs.readFileSync(path.join(__dirname,"../word-bank.js"),"utf8"),bankContext);
 const bank=bankContext.window.IMPOSTER_BANK;
+const TOTAL=bank.categories.reduce((n,c)=>n+c.groups.reduce((m,g)=>m+g.words.length,0),0);
 function rng(seed=123456){
  let state=seed>>>0;
  return ()=>{state=(Math.imul(state,1664525)+1013904223)>>>0;return state/4294967296};
@@ -18,7 +19,7 @@ const groupFor=word=>bank.categories.flatMap(c=>c.groups).find(g=>g.words.includ
 const next=(s,r)=>core.start(s,bank,r);
 test("word bank is valid, unique and guesses are drawable",()=>{
  const c=core.catalogue(bank);
- assert.equal(c.words.length,363);
+ assert.equal(c.words.length,TOTAL);
  assert.equal(c.words.length,wordSet.size);
  for(const category of bank.categories)for(const g of category.groups){
   assert.ok(g.words.length>=6);
@@ -30,10 +31,10 @@ test("word bank is valid, unique and guesses are drawable",()=>{
   assert.ok(g.discussion.every(q=>typeof q==="string"&&q.length>0));
  }
 });
-test("all 363 words drawn once, then explicit reset; 100 independent full decks",()=>{
+test("all available words drawn once, then explicit reset; 100 independent full decks",()=>{
  for(let seed=1;seed<=100;seed++){
   let state=fresh(),seen=new Set(),r=rng(seed);
-  for(let i=0;i<363;i++){
+  for(let i=0;i<TOTAL;i++){
    const out=next(state,r);
    assert.equal(out.exhausted,false);
    state=out.state;
@@ -46,19 +47,19 @@ test("all 363 words drawn once, then explicit reset; 100 independent full decks"
    seen.add(state.active.word);
    state=core.abandon({...state,active:{...state.active,viewed:1}});
   }
-  assert.equal(seen.size,363);
+  assert.equal(seen.size,TOTAL);
   assert.equal(core.remaining(state,bank,"عشوائي"),0);
   assert.equal(next(state,r).exhausted,true);
   state=core.resetWords(state);
-  assert.equal(core.remaining(state,bank,"عشوائي"),363);
+  assert.equal(core.remaining(state,bank,"عشوائي"),TOTAL);
  }
 });
 test("category variety remains high late in the deck",()=>{
  for(let seed=50;seed<=75;seed++){
   let state=fresh(),r=rng(seed),last50=[];
-  for(let i=0;i<363;i++){
+  for(let i=0;i<TOTAL;i++){
    const out=next(state,r);state=out.state;
-   if(i>=313)last50.push(state.active.category);
+   if(i>=TOTAL-50)last50.push(state.active.category);
    state=core.abandon({...state,active:{...state.active,viewed:1}});
   }
   assert.ok(new Set(last50).size>=6,"Late-deck category collapse for seed "+seed);
@@ -154,7 +155,7 @@ test("role fairness, persistence, and no consecutive impostor assignments",()=>{
    assert.notEqual(state.active.spyId,last);
    last=state.active.spyId;
    state=core.abandon({...state,active:{...state.active,viewed:1}});
-   if(state.used.length===363)state=core.resetWords(state);
+   if(state.used.length===TOTAL)state=core.resetWords(state);
    if(i%10===0)state=core.initial(bank,JSON.parse(JSON.stringify(state)),null,null);
   }
  }
@@ -175,13 +176,13 @@ test("editor disables words and never creates invalid six-option groups",()=>{
  let s=fresh();
  const group=bank.categories[0].groups[0];
  s=core.filterWord(s,bank,group.words[0],true);
- assert.equal(core.remaining(s,bank,"عشوائي"),357); // six-word group disabled until all six are valid
+ assert.equal(core.remaining(s,bank,"عشوائي"),TOTAL-6); // six-word group disabled until all six are valid
  s=core.filterWord(s,bank,group.words[1],true);
- assert.equal(core.remaining(s,bank,"عشوائي"),357); // 4 left disables whole six-word group
+ assert.equal(core.remaining(s,bank,"عشوائي"),TOTAL-6); // 4 left disables whole six-word group
  s=core.filterWord(s,bank,group.words[0],false);
- assert.equal(core.remaining(s,bank,"عشوائي"),357); // five remaining: group still ineligible
+ assert.equal(core.remaining(s,bank,"عشوائي"),TOTAL-6); // five remaining: group still ineligible
  s=core.filterWord(s,bank,group.words[1],false);
- assert.equal(core.remaining(s,bank,"عشوائي"),363);
+ assert.equal(core.remaining(s,bank,"عشوائي"),TOTAL);
 });
 
 
@@ -196,7 +197,7 @@ test("no hint variant or actual private question names a candidate answer",()=>{
  }
  for(let seed=1;seed<=10;seed++){
   let s=fresh(),random=rng(1000+seed);
-  for(let i=0;i<363;i++){
+  for(let i=0;i<TOTAL;i++){
    s=core.start(s,bank,random).state;
    const g=groupFor(s.active.word);
    assert.ok(g.questionAngles.includes(s.active.questions[0]));
