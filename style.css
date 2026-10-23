@@ -38,3 +38,14 @@ summary{cursor:pointer;padding:8px 0}
 .review-questions li{margin:5px 0;overflow-wrap:anywhere}
 #backupFile{font-size:13px;direction:rtl;max-width:100%}
 #backupFile::file-selector-button{border-radius:8px;padding:8px;color:#172033;background:#ffda80;border:0;font-weight:bold;cursor:pointer}
+
+
+/* WebKit 320px: flex items and long Arabic filenames must be allowed to shrink. */
+html,body{width:100%;max-width:100%}
+main,.panel,header,header>div{min-width:0;max-width:100%}
+header>div{flex:1;min-width:0}
+header h1,header small{display:block;overflow-wrap:anywhere;word-break:break-word}
+header b{flex-shrink:0}
+.panel>*,.choices,.stack,.scoreline{min-width:0}
+.choices button,.pill,.scoreline span{overflow-wrap:anywhere;word-break:break-word}
+input[type=file]{min-width:0;max-width:100%;overflow:hidden}
