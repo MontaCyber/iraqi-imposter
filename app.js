@@ -1,7 +1,7 @@
 /* منو الدخيل؟ | accessible single-phone UI and durable local game session */
 (function(root){
 "use strict";
-const APP_VERSION="1.4.0",KEY="imposterGameV4",LOCK_KEY="imposterOwnerV4";
+const APP_VERSION="1.5.0",KEY="imposterGameV4",LOCK_KEY="imposterOwnerV4";
 const core=root.ImposterCore,bank=root.IMPOSTER_BANK,app=document.getElementById("app");
 const safeParse=x=>{try{return JSON.parse(x)}catch{return null}};
 const esc=x=>String(x??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
@@ -14,12 +14,9 @@ const rand=()=>{
   }
   return Math.random();
 };
-let state,locked=false,mode="setup",notice="",storageOk=true,remainingPrev=-1;
-let tabId;
-try{
- tabId=sessionStorage.getItem("imposterTabV4");
- if(!tabId){tabId="tab-"+Math.random().toString(36).slice(2)+Date.now();sessionStorage.setItem("imposterTabV4",tabId)}
-}catch(e){tabId="tab-"+Math.random().toString(36).slice(2)+Date.now()}
+let state,locked=false,mode="setup",notice="",storageOk=true,remainingPrev=-1,savedRevision=0;
+// A duplicated browser tab may clone sessionStorage, so this identifier must NEVER be stored there.
+const tabId="document-"+(root.crypto?.randomUUID?.()||Math.random().toString(36).slice(2)+"-"+Date.now());
 function lockInfo(){try{return safeParse(localStorage.getItem(LOCK_KEY))}catch{return null}}
 function takeOwnership(force){
  const prev=lockInfo(),now=Date.now();
@@ -39,16 +36,35 @@ function heartbeat(){
  takeOwnership(false);
 }
 function persist(){
- if(locked)throw Error("Session belongs to another tab");
- try{localStorage.setItem(KEY,JSON.stringify(state));storageOk=true}
- catch(e){storageOk=false;notice="ما نكدر نحفظ اللعبة على هذا المتصفح. لا تحدث الصفحة."}
+ if(locked)throw Error("اللعبة مفتوحة بتبويب ثاني. لا تحفظ من نسخة قديمة.");
+ const owner=lockInfo();
+ if(owner&&owner.tab!==tabId){locked=true;throw Error("تم نقل اللعبة لتبويب آخر. حدث الصفحة للمتابعة.");}
+ let previous;
+ try{previous=safeParse(localStorage.getItem(KEY))}
+ catch(e){storageOk=false;throw Error("حفظ المتصفح مو متاح؛ ما نكدر نبدأ جولة جديدة بأمان.")}
+ const actual=previous&&Number.isSafeInteger(previous.revision)?previous.revision:0;
+ if(actual!==savedRevision){
+   locked=true;throw Error("اللعبة اتغيّرت من تبويب ثاني. حتى ما نضيّع الكلمات وقفنا الحفظ.");
+ }
+ const nextRevision=actual+1;
+ state.revision=nextRevision;
+ try{
+   localStorage.setItem(KEY,JSON.stringify(state));
+   const checked=safeParse(localStorage.getItem(KEY));
+   const ownerAfter=lockInfo();
+   if(!checked||checked.revision!==nextRevision||ownerAfter&&ownerAfter.tab!==tabId){
+     locked=true;throw Error("صار تضارب بالحفظ؛ افتح آخر نسخة محفوظة قبل ما تكمل.");
+   }
+   savedRevision=nextRevision;storageOk=true;
+ }catch(e){storageOk=false;throw Error("تعذّر حفظ اللعبة: "+(e.message||"مساحة المتصفح ممتلئة"))}
 }
 function legacyCycle(){try{return safeParse(localStorage.getItem("imposterCycleV3"))}catch{return null}}
 function legacyScores(){try{return safeParse(localStorage.getItem("imposterScores"))}catch{return null}}
 function load(){
  const saved=(()=>{try{return safeParse(localStorage.getItem(KEY))}catch{return null}})();
+ savedRevision=saved&&Number.isSafeInteger(saved.revision)?saved.revision:0;
  state=core.initial(bank,saved,legacyCycle(),legacyScores());
- if(!locked)persist(); // Persist normalized state and re-hide secret cards after refresh.
+ if(!locked)persist(); // Migrate once, and re-hide a revealed card before anyone sees the screen.
  mode=state.active?"game":"setup";
 }
 function rootError(msg){
@@ -61,7 +77,9 @@ try{core.catalogue(bank);takeOwnership(false);load()}
 catch(e){rootError("معلومات اللعبة المحفوظة غير صالحة. جرّب إعادة التحميل. "+e.message);return}
 function show(text){notice=text;render()}
 function commit(next){
- state=next;persist();mode=state.active?"game":"setup";remainingPrev=-1;render();
+ const old=state;state=next;
+ try{persist()}catch(e){state=old;throw e}
+ mode=state.active?"game":"setup";remainingPrev=-1;render();
 }
 function commitError(fn){
  try{fn()}catch(e){show(e.message||"صار خطأ غير متوقع")}
@@ -180,19 +198,12 @@ function readNames(){
 }
 function saveRoster(){
  if(state.active)return true;
- const list=readNames();
+ const list=readNames(),previous=state;
  try{
   state=core.updateRoster(state,list);
-  const legacy=legacyScores();
-  if(legacy&&typeof legacy==="object"&&!Array.isArray(legacy)){
-   for(const p of state.roster){
-    if(!state.scores[p.id]&&Object.hasOwn(legacy,p.name)&&Number.isFinite(legacy[p.name])){
-      state.scores[p.id]=Math.max(0,Math.floor(legacy[p.name]));
-    }
-   }
-  }
+  // Legacy migration happens ONLY on the initial V4 load, never on a zero score.
   persist();return true;
- }catch(e){notice=e.message;render();return false}
+ }catch(e){state=previous;notice=e.message;render();return false}
 }
 function handle(action,target){
  if(locked){
