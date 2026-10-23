@@ -3,7 +3,8 @@ const assert=require("node:assert/strict");
 const fs=require("node:fs");
 const http=require("node:http");
 const path=require("node:path");
-const {chromium}=require("playwright");
+const {chromium,webkit}=require("playwright");
+const browserName=process.env.TEST_BROWSER||"chromium";
 const root=path.join(__dirname,"..");
 const types={".html":"text/html; charset=utf-8",".js":"text/javascript; charset=utf-8",".svg":"image/svg+xml",".webmanifest":"application/manifest+json"};
 const server=http.createServer((req,res)=>{
@@ -21,7 +22,9 @@ const server=http.createServer((req,res)=>{
 async function launch(){
  await new Promise(ok=>server.listen(0,"127.0.0.1",ok));
  const port=server.address().port;
- const browser=await chromium.launch({headless:true,args:["--no-sandbox"]});
+ const engine={chromium,webkit}[browserName];
+ if(!engine)throw Error("Unknown engine "+browserName);
+ const browser=await engine.launch({headless:true,args:browserName==="chromium"?["--no-sandbox"]:[]});
  return {browser,url:"http://127.0.0.1:"+port+"/"};
 }
 const waitFor=async(page)=>{await page.locator('[data-action="start"]').waitFor({timeout:10000})};
@@ -87,7 +90,51 @@ async function playOneRound(page,count){
    console.log("PASS offline reload after pre-cache");
    await context.close();
   }
-  console.log("ALL CHROMIUM SMOKE TESTS PASSED");
+  // Exercise real browser JSON backup/restore, including persisted scores and used words.
+  {
+   const context=await browser.newContext({viewport:{width:390,height:840},acceptDownloads:true});
+   const page=await context.newPage();
+   page.on("dialog",d=>d.accept());
+   await page.goto(url,{waitUntil:"networkidle"});await waitFor(page);
+   const [download]=await Promise.all([
+     page.waitForEvent("download"),
+     page.locator('[data-action="export"]').click()
+   ]);
+   const original=JSON.parse(fs.readFileSync(await download.path(),"utf8"));
+   assert.equal(original.format,"iraqi-imposter-v4-save");
+   assert.ok(original.state.roster.length>=3);
+   await page.locator('[data-action="start"]').click();
+   const afterStart=await page.evaluate(()=>JSON.parse(localStorage.getItem("imposterGameV4")));
+   assert.equal(afterStart.used.length,original.state.used.length+1);
+   for(let i=0;i<5;i++){await page.locator('[data-action="reveal"]').click();await page.locator('[data-action="next"]').click();}
+   await page.locator('[data-action="forceEnd"]').click();
+   await page.locator('[data-action="showGuess"]').click();
+   await page.locator('[data-action="guess"]').first().click();
+   await page.locator('[data-action="newRound"]').click();
+   await page.locator('#backupFile').setInputFiles({name:"restore.json",mimeType:"application/json",buffer:Buffer.from(JSON.stringify(original))});
+   await page.waitForTimeout(200);
+   const restored=await page.evaluate(()=>JSON.parse(localStorage.getItem("imposterGameV4")));
+   assert.equal(restored.used.length,original.state.used.length);
+   assert.equal(restored.active,null);
+   console.log("PASS JSON save/export and restore");
+   await context.close();
+  }
+  {
+   const context=await browser.newContext({viewport:{width:390,height:840}});
+   const a=await context.newPage();a.on("dialog",d=>d.accept());
+   await a.goto(url,{waitUntil:"networkidle"});await waitFor(a);
+   await a.locator('[data-action="start"]').click();
+   const before=await a.evaluate(()=>JSON.parse(localStorage.getItem("imposterGameV4")));
+   const b=await context.newPage();b.on("dialog",d=>d.accept());
+   await b.goto(url,{waitUntil:"networkidle"});
+   assert.ok((await b.locator("#app").innerText()).includes("اللعبة مفتوحة بتبويب ثاني"));
+   await b.locator('[data-action="takeLock"]').click();
+   const after=await b.evaluate(()=>JSON.parse(localStorage.getItem("imposterGameV4")));
+   assert.ok(after.used.includes(before.active.word));
+   console.log("PASS second-tab ownership and safe takeover");
+   await context.close();
+  }
+  console.log("ALL "+browserName.toUpperCase()+" SMOKE TESTS PASSED");
  }catch(e){
   console.error(e.stack||e);process.exitCode=1;
  }finally{
