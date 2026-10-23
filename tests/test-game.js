@@ -183,3 +183,63 @@ test("editor disables words and never creates invalid six-option groups",()=>{
  s=core.filterWord(s,bank,group.words[1],false);
  assert.equal(core.remaining(s,bank,"عشوائي"),363);
 });
+
+
+test("no hint variant or actual private question names a candidate answer",()=>{
+ const normalize=x=>x.normalize("NFKC").replace(/[\\u064B-\\u065F\\u0670]/g,"").replace(/[أإآ]/g,"ا").replace(/ة/g,"ه").replace(/ى/g,"ي").toLowerCase();
+ for(const category of bank.categories)for(const group of category.groups){
+  const options=group.words.map(normalize);
+  const leak=x=>options.some(w=>w.length>=3&&normalize(x).includes(w));
+  assert.ok(group.hints.length>=2);
+  assert.equal(group.questionAngles.length,10);
+  for(const text of [...group.hints,...group.questionAngles])assert.equal(leak(text),false,"Spoiler detected: "+text);
+ }
+ for(let seed=1;seed<=10;seed++){
+  let s=fresh(),random=rng(1000+seed);
+  for(let i=0;i<363;i++){
+   s=core.start(s,bank,random).state;
+   const g=groupFor(s.active.word);
+   assert.ok(g.questionAngles.includes(s.active.questions[0]));
+   assert.ok(g.questionAngles.includes(s.active.questions[1]));
+   assert.ok(!g.wordQuestions); // Answer-specific editorial questions must remain private to review tools.
+   s=core.abandon({...s,active:{...s.active,viewed:1}});
+  }
+ }
+});
+test("question recipients and askers each cover every player per randomized full cycle",()=>{
+ for(let players=3;players<=10;players++){
+  for(let seed=1;seed<=30;seed++){
+   let s=core.updateRoster(fresh(),Array.from({length:players},(_,i)=>"P"+i)),random=rng(seed*7121+players);
+   s=core.start(s,bank,random).state;
+   for(let i=0;i<players;i++)s=core.concealNext(core.reveal(s),1000,random);
+   const askers=[],targets=[];
+   for(let i=0;i<players;i++){
+    const {asker,target}=s.active;assert.notEqual(asker,target);
+    askers.push(asker);targets.push(target);
+    if(i!==players-1)s=core.nextQuestion(s,random);
+   }
+   assert.equal(new Set(askers).size,players);
+   assert.equal(new Set(targets).size,players);
+   assert.equal(core.endDiscussion(s,false,1200).active.phase,"guess-pass");
+  }
+ }
+});
+test("corrupt duplicate saved player IDs cannot produce two impostors",()=>{
+ const saved={version:4,roster:[{id:"p2",name:"علي"},{id:"p2",name:"حسين"},{id:"p3",name:"منى"}],scores:{p2:4,p3:2},used:[]};
+ const state=core.initial(bank,saved,null,null);
+ assert.equal(new Set(state.roster.map(p=>p.id)).size,3);
+ const out=core.start(state,bank,rng(53)).state;
+ assert.equal(out.roster.filter(p=>p.id===out.active.spyId).length,1);
+});
+test("minimum discussion is a full questioning cycle unless host overrides or timer expires",()=>{
+ for(let n=3;n<=10;n++){
+  let s=core.updateRoster(fresh(),Array.from({length:n},(_,i)=>"P"+i)),random=rng(n*4);
+  s=core.start(s,bank,random).state;
+  for(let i=0;i<n;i++)s=core.concealNext(core.reveal(s),1000,random);
+  assert.throws(()=>core.endDiscussion(s,false,1100),/confirmation/);
+  const override=core.endDiscussion(s,true,1100);
+  assert.equal(override.active.phase,"guess-pass");
+  for(let i=1;i<n;i++)s=core.nextQuestion(s,random);
+  assert.equal(core.endDiscussion(s,false,1100).active.phase,"guess-pass");
+ }
+});
