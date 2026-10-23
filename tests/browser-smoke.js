@@ -42,6 +42,7 @@ async function playOneRound(page,count){
  assert.equal(spyCards,1);
  assert.equal(regular,count-1);
  assert.match(await page.locator("#app").innerText(),/منو يسأل من/);
+ for(let i=1;i<count;i++)await page.locator('[data-action="nextQuestion"]').click();
  await page.locator('[data-action="endDiscussion"]').click();
  await page.locator('[data-action="showGuess"]').click();
  assert.equal(await page.locator('[data-action="guess"]').count(),6);
