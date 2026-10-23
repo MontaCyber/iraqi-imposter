@@ -66,7 +66,10 @@ async function playOneRound(page,count){
    await page.goto(url,{waitUntil:"networkidle"});
    await waitFor(page);
    const overflow=await page.evaluate(()=>document.documentElement.scrollWidth-window.innerWidth);
-   assert.ok(overflow<=2,"Horizontal overflow "+overflow+"px at "+width);
+   if(overflow>2){
+     const offenders=await page.evaluate(()=>[...document.querySelectorAll("*")].map(el=>({tag:el.tagName,cls:el.className,left:Math.round(el.getBoundingClientRect().left),right:Math.round(el.getBoundingClientRect().right),width:el.scrollWidth,text:el.textContent?.slice(0,32)})).filter(el=>el.right>innerWidth+2||el.left< -2).slice(0,12));
+     throw new Error("Horizontal overflow "+overflow+"px at "+width+": "+JSON.stringify(offenders));
+   }
    await setupPlayerCount(page,width===320?3:width===375?5:width===430?7:10);
    await playOneRound(page,width===320?3:width===375?5:width===430?7:10);
    assert.equal(errors.length,0,"Page errors: "+JSON.stringify(errors));
