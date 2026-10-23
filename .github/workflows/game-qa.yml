@@ -3,7 +3,7 @@ on:
   pull_request:
     branches: [main]
   push:
-    branches: [main, fix/deep-audit-v15-20261023]
+    branches: [main]
   workflow_dispatch:
 concurrency:
   group: game-qa-${{ github.ref }}
