@@ -50,7 +50,11 @@
     if(!Array.isArray(roster)||roster.length<3||roster.length>10)return makeRoster(5);
     const seen=new Set();
     return roster.map((p,i)=>{
-      const id=plain(p)&&typeof p.id==="string"&&/^[a-zA-Z0-9_-]{1,50}$/.test(p.id)&&!seen.has(p.id)?p.id:"p"+(i+1);
+      const candidate=plain(p)&&typeof p.id==="string"&&/^[a-zA-Z0-9_-]{1,50}$/.test(p.id)?p.id:"";
+      const base="p"+(i+1);
+      let id=candidate&&!seen.has(candidate)?candidate:base;
+      let suffix=1;
+      while(seen.has(id))id=base+"_"+(suffix++);
       seen.add(id);
       return {id,name:safeName(p&&p.name)||"اللاعب "+(i+1)};
     });
@@ -58,6 +62,8 @@
   function initial(bank, saved, legacyCycle, legacyScores){
     const cat=catalogue(bank),s=plain(saved)&&saved.version===VERSION?saved:{};
     const roster=cleanRoster(s.roster);
+    const savedIDs=Array.isArray(s.roster)?s.roster.map(p=>p&&p.id):[];
+    const unsafeIDs=savedIDs.length===roster.length&&savedIDs.some((id,i)=>id!==roster[i].id);
     const ids=new Set(roster.map(p=>p.id)),scores={};
     for(const p of roster){
       let value=plain(s.scores)&&Object.hasOwn(s.scores,p.id)?s.scores[p.id]:0;
@@ -69,15 +75,17 @@
     const cleanUsed=[...new Set(used.filter(w=>typeof w==="string"&&cat.set.has(w)))];
     const state={
       version:VERSION,roster,scores,used:cleanUsed,round:Math.min(100000,Math.max(0,Number(s.round)||0)),
+      revision:Number.isSafeInteger(s.revision)&&s.revision>=0?s.revision:0,
       category:Object.hasOwn(cat.categories,s.category)?s.category:"عشوائي",
       recentCategories:Array.isArray(s.recentCategories)?s.recentCategories.filter(x=>typeof x==="string").slice(-4):[],
       recentGroups:Array.isArray(s.recentGroups)?s.recentGroups.filter(x=>typeof x==="string").slice(-5):[],
       recentHints:Array.isArray(s.recentHints)?s.recentHints.filter(x=>typeof x==="string").slice(-18):[],
+      recentQuestions:Array.isArray(s.recentQuestions)?s.recentQuestions.filter(x=>typeof x==="string").slice(-25):[],
       spyCounts:plain(s.spyCounts)?s.spyCounts:{},lastSpy:typeof s.lastSpy==="string"?s.lastSpy:"",
       blocked:Array.isArray(s.blocked)?s.blocked.filter(x=>cat.set.has(x)):[],
       active:null
     };
-    if(plain(s.active)){
+    if(plain(s.active)&&!unsafeIDs){
       const a=s.active, group=Object.values(cat.categories).flat().find(g=>g.words.includes(a.word));
       const eligible=group&&ids.has(a.spyId)&&["pass","reveal","talk","guess-pass","guess","result"].includes(a.phase);
       if(eligible&&Array.isArray(a.options)&&a.options.length===6&&a.options.includes(a.word)&&new Set(a.options).size===6&&a.options.every(w=>group.words.includes(w))){
@@ -88,6 +96,7 @@
           hint:typeof a.hint==="string"?a.hint.slice(0,180):group.hint,
           questions:Array.isArray(a.questions)?a.questions.slice(0,2).map(String):[],
           askQueue:Array.isArray(a.askQueue)?a.askQueue.filter(id=>ids.has(id)):[],
+          targetQueue:Array.isArray(a.targetQueue)?a.targetQueue.filter(id=>ids.has(id)):[],
           asker:ids.has(a.asker)?a.asker:"",target:ids.has(a.target)?a.target:"",
           askTurn:Math.max(0,Math.min(1000,Number(a.askTurn)||0)),
           askedCounts:plain(a.askedCounts)?a.askedCounts:{},
@@ -137,13 +146,22 @@
     return weighted(players,p=>Math.exp(-0.075*(finite(state.spyCounts[p.id])-low)),rng).id;
   }
   function hintFor(state,bank,group,rng){
-    const variants=Array.isArray(group.hints)&&group.hints.length?group.hints:[group.hint];
+    const normalize=x=>x.normalize("NFKC").replace(/[\u064B-\u065F\u0670]/g,"").replace(/[أإآ]/g,"ا").replace(/ة/g,"ه").replace(/ى/g,"ي").toLowerCase();
+    const words=group.words.map(normalize);
+    const mentionsCandidate=text=>words.some(w=>w.length>=3&&normalize(text).includes(w));
+    const variants=(Array.isArray(group.hints)&&group.hints.length?group.hints:[group.hint]).filter(h=>typeof h==="string"&&!mentionsCandidate(h));
     const fresh=variants.filter(h=>!state.recentHints.slice(-6).includes(h)),pool=fresh.length?fresh:variants;
-    const hint=pool[randomInt(pool.length,rng)];
-    const common=Array.isArray(group.discussion)&&group.discussion.length>=2?group.discussion:bank.questions[group.questionSet]||[];
-    const candidates=shuffle(common,rng).slice(0,2);
+    const hint=pool.length?pool[randomInt(pool.length,rng)]:"فكّر بطبيعته واستعماله من دون ما تعرف اسمه";
+    // Word-specific editorial questions would disclose the correct word; they are NEVER shown to the impostor.
+    const common=(Array.isArray(group.questionAngles)&&group.questionAngles.length>=10?group.questionAngles:
+      Array.isArray(group.discussion)?group.discussion:bank.questions[group.questionSet]||[])
+      .filter(q=>typeof q==="string"&&!mentionsCandidate(q));
+    const candidates=common.filter(q=>!state.recentQuestions.slice(-10).includes(q));
+    const selected=shuffle(candidates.length>=2?candidates:common,rng).slice(0,2);
+    if(selected.length!==2)throw Error("Two safe question starters required");
     state.recentHints.push(hint);state.recentHints=state.recentHints.slice(-18);
-    return {hint,questions:candidates};
+    state.recentQuestions.push(...selected);state.recentQuestions=state.recentQuestions.slice(-25);
+    return {hint,questions:selected};
   }
   function start(state,bank,rng){
     if(state.active&&!["result"].includes(state.active.phase))throw new Error("Round already active");
@@ -157,7 +175,7 @@
     next.recentCategories.push(p.category);next.recentCategories=next.recentCategories.slice(-4);
     next.recentGroups.push(p.group.id);next.recentGroups=next.recentGroups.slice(-5);
     next.active={word:p.word,category:p.category,groupId:p.group.id,spyId,phase:"pass",index:0,viewed:0,
-      options:choices,hint:help.hint,questions:help.questions,askQueue:[],asker:"",target:"",
+      options:choices,hint:help.hint,questions:help.questions,askQueue:[],targetQueue:[],asker:"",target:"",
       askTurn:0,askedCounts:{},lastPair:"",deadline:0,awarded:false,correct:false};
     return {state:next,exhausted:false};
   }
@@ -173,17 +191,31 @@
     return s;
   }
   function questionInState(s,rng){
-    const a=s.active,roster=s.roster;
+    const a=s.active,roster=s.roster,ids=roster.map(p=>p.id),count=ids.length;
+    // In each randomized cycle, everyone asks exactly once AND everyone answers exactly once.
+    // The two shuffled permutations form a derangement: nobody asks themselves.
     if(!a.askQueue.length){
-      a.askQueue=shuffle(roster.map(p=>p.id),rng);
-      if(a.askQueue.length>1&&a.askQueue.at(-1)===a.asker)[a.askQueue[0],a.askQueue[a.askQueue.length-1]]=[a.askQueue.at(-1),a.askQueue[0]];
+      const askers=shuffle(ids,rng);
+      let targets=null;
+      for(let attempt=0;attempt<24;attempt++){
+        const shuffled=shuffle(ids,rng);
+        if(shuffled.every((id,i)=>id!==askers[i])){targets=shuffled;break}
+      }
+      if(!targets){
+        const shift=1+randomInt(count-1,rng);
+        targets=askers.map((_,i)=>askers[(i+shift)%count]);
+      }
+      a.askQueue=askers;
+      a.targetQueue=targets;
     }
-    const asker=a.askQueue.pop(),candidates=roster.filter(p=>p.id!==asker);
-    const values=candidates.map(p=>finite(a.askedCounts[p.id])),low=Math.min(...values);
-    const target=weighted(candidates,p=>{
-      const times=finite(a.askedCounts[p.id]);
-      return Math.exp(-0.95*(times-low))*(a.lastPair===asker+":"+p.id?0.15:1);
-    },rng).id;
+    const asker=a.askQueue.pop();
+    // For older saved games which didn't have a target queue, pick an unasked eligible player.
+    let target=a.targetQueue&&a.targetQueue.length?a.targetQueue.pop():null;
+    if(!target||target===asker){
+      const candidates=roster.filter(p=>p.id!==asker);
+      const low=Math.min(...candidates.map(p=>finite(a.askedCounts[p.id])));
+      target=weighted(candidates,p=>Math.exp(-1.3*(finite(a.askedCounts[p.id])-low)),rng).id;
+    }
     a.asker=asker;a.target=target;a.lastPair=asker+":"+target;a.askTurn++;
     a.askedCounts[target]=finite(a.askedCounts[target])+1;
     return a;
