@@ -3,7 +3,7 @@ on:
   pull_request:
     branches: [main]
   push:
-    branches: [main, fix/audit-gameplay-hardening-20261023]
+    branches: [main, fix/deep-audit-v15-20261023]
   workflow_dispatch:
 permissions:
   contents: read
