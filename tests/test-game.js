@@ -177,5 +177,7 @@ test("editor disables words and never creates invalid six-option groups",()=>{
  s=core.filterWord(s,bank,group.words[1],true);
  assert.equal(core.remaining(s,bank,"عشوائي"),357); // 4 left disables whole six-word group
  s=core.filterWord(s,bank,group.words[0],false);
- assert.equal(core.remaining(s,bank,"عشوائي"),362);
+ assert.equal(core.remaining(s,bank,"عشوائي"),357); // five remaining: group still ineligible
+ s=core.filterWord(s,bank,group.words[1],false);
+ assert.equal(core.remaining(s,bank,"عشوائي"),363);
 });
