@@ -40,3 +40,7 @@
 2. The PR must be reviewed and merged only after green checks.
 3. The verified commit must be published through the QA-gated workflow, and the deployed URL checked.
 4. No new hardcoded or candidate-word hints; no automatic reset of used words; no duplicate per-round impostors.
+
+### WebKit offline test limitation
+
+The v1.5 Linux Playwright WebKit run passed gameplay at 320/375/430/1280px and hidden-card reload, but `context.setOffline(true) + page.reload()` raised an internal WebKit driver error before application code could be assessed. The browser matrix now requires WebKit rendering, gameplay, recovery, backup and tab-ownership tests, plus service-worker registration. Offline loading is tested separately in Chromium and in the service-worker simulation. Physical Safari offline usage remains an external QA requirement.
