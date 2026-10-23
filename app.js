@@ -165,10 +165,19 @@ function resultView(a){
 }
 function reviewView(){
  const byCat=bank.categories.map(c=>{
- const body=c.groups.map(group=>'<div class="word-grid">'+group.words.map(word=>{
- const excluded=state.blocked.includes(word);
- return '<button type="button" class="word-chip '+(excluded?"excluded":"")+'" data-action="toggleWord" data-word="'+esc(word)+'" aria-pressed="'+excluded+'">'+esc(word)+(excluded?" ×":" ✓")+'</button>';
- }).join("")+'</div>').join("");
+ const body=c.groups.map((group,index)=>{
+   const chips=group.words.map(word=>{
+     const excluded=state.blocked.includes(word);
+     return '<button type="button" class="word-chip '+(excluded?"excluded":"")+'" data-action="toggleWord" data-word="'+esc(word)+'" aria-pressed="'+excluded+'">'+esc(word)+(excluded?" ×":" ✓")+'</button>';
+   }).join("");
+   const examples=group.words.filter(w=>bank.wordQuestions?.[w]).map(word=>
+     '<details><summary>أسئلة خاصة لتدقيق: '+esc(word)+'</summary><ol class="review-questions">'+bank.wordQuestions[word].map(q=>'<li>'+esc(q)+'</li>').join("")+'</ol></details>'
+   ).join("");
+   return '<section class="word-group"><h3>مجموعة '+(index+1)+' — '+group.words.length+' كلمات</h3>'+
+      '<div class="word-grid">'+chips+'</div>'+
+      '<details><summary>التلميحات الآمنة وأسئلة النقاش</summary><p class="muted">تلميحات عامة تنطبق على أكثر من خيار:</p><ul class="review-questions">'+group.hints.map(h=>'<li>'+esc(h)+'</li>').join("")+'</ul>'+
+      '<p class="muted">١٠ أسئلة محتملة للمجموعة:</p><ol class="review-questions">'+group.questionAngles.map(q=>'<li>'+esc(q)+'</li>').join("")+'</ol></details>'+examples+'</section>';
+ }).join("");
  return '<details><summary>'+esc(c.name)+' ('+c.groups.reduce((n,g)=>n+g.words.length,0)+')</summary>'+body+'</details>';
  }).join("");
  panel('<h2 tabindex="-1">مراجعة الكلمات</h2><p>اضغط أي كلمة حتى توقف ظهورها، واضغط مرة ثانية حتى ترجع. المجموعة تحتاج ٦ كلمات على الأقل حتى تدخل بالاختيار.</p>'+
