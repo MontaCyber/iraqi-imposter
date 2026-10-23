@@ -173,7 +173,7 @@ test("editor disables words and never creates invalid six-option groups",()=>{
  let s=fresh();
  const group=bank.categories[0].groups[0];
  s=core.filterWord(s,bank,group.words[0],true);
- assert.equal(core.remaining(s,bank,"عشوائي"),362);
+ assert.equal(core.remaining(s,bank,"عشوائي"),357); // six-word group disabled until all six are valid
  s=core.filterWord(s,bank,group.words[1],true);
  assert.equal(core.remaining(s,bank,"عشوائي"),357); // 4 left disables whole six-word group
  s=core.filterWord(s,bank,group.words[0],false);
