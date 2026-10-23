@@ -45,7 +45,6 @@ jobs:
 
   webkit-smoke:
     name: Browser compatibility — WebKit (additional confidence)
-    continue-on-error: true
     runs-on: ubuntu-latest
     timeout-minutes: 12
     container: mcr.microsoft.com/playwright:v1.56.1-noble
@@ -60,7 +59,7 @@ jobs:
   publish:
     name: Publish only after complete QA
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    needs: [test, browser-smoke]
+    needs: [test, browser-smoke, webkit-smoke]
     runs-on: ubuntu-latest
     timeout-minutes: 8
     permissions:
@@ -72,6 +71,15 @@ jobs:
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - uses: actions/checkout@v4
+      - name: Set Pages source to QA-gated GitHub Actions
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh api --method PUT "repos/${GITHUB_REPOSITORY}/pages" -f build_type=workflow; then
+            echo "GitHub Pages source is now workflow-managed."
+          else
+            echo "::warning::Pages source setting could not be switched automatically. Set Settings → Pages → Source → GitHub Actions."
+          fi
       - uses: actions/configure-pages@v5
       - name: Stage verified public site files
         run: |
