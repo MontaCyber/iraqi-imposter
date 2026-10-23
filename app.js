@@ -1,7 +1,7 @@
 /* منو الدخيل؟ | accessible single-phone UI and durable local game session */
 (function(root){
 "use strict";
-const APP_VERSION="1.4.0",KEY="imposterGameV4",LOCK_KEY="imposterOwnerV4";
+const APP_VERSION="1.5.0",KEY="imposterGameV4",LOCK_KEY="imposterOwnerV4";
 const core=root.ImposterCore,bank=root.IMPOSTER_BANK,app=document.getElementById("app");
 const safeParse=x=>{try{return JSON.parse(x)}catch{return null}};
 const esc=x=>String(x??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
@@ -14,12 +14,9 @@ const rand=()=>{
   }
   return Math.random();
 };
-let state,locked=false,mode="setup",notice="",storageOk=true,remainingPrev=-1;
-let tabId;
-try{
- tabId=sessionStorage.getItem("imposterTabV4");
- if(!tabId){tabId="tab-"+Math.random().toString(36).slice(2)+Date.now();sessionStorage.setItem("imposterTabV4",tabId)}
-}catch(e){tabId="tab-"+Math.random().toString(36).slice(2)+Date.now()}
+let state,locked=false,mode="setup",notice="",storageOk=true,remainingPrev=-1,savedRevision=0;
+// A duplicated browser tab may clone sessionStorage, so this identifier must NEVER be stored there.
+const tabId="document-"+(root.crypto?.randomUUID?.()||Math.random().toString(36).slice(2)+"-"+Date.now());
 function lockInfo(){try{return safeParse(localStorage.getItem(LOCK_KEY))}catch{return null}}
 function takeOwnership(force){
  const prev=lockInfo(),now=Date.now();
@@ -39,21 +36,41 @@ function heartbeat(){
  takeOwnership(false);
 }
 function persist(){
- if(locked)throw Error("Session belongs to another tab");
- try{localStorage.setItem(KEY,JSON.stringify(state));storageOk=true}
- catch(e){storageOk=false;notice="ما نكدر نحفظ اللعبة على هذا المتصفح. لا تحدث الصفحة."}
+ if(locked)throw Error("اللعبة مفتوحة بتبويب ثاني. لا تحفظ من نسخة قديمة.");
+ const owner=lockInfo();
+ if(owner&&owner.tab!==tabId){locked=true;throw Error("تم نقل اللعبة لتبويب آخر. حدث الصفحة للمتابعة.");}
+ let previous;
+ try{previous=safeParse(localStorage.getItem(KEY))}
+ catch(e){storageOk=false;throw Error("حفظ المتصفح مو متاح؛ ما نكدر نبدأ جولة جديدة بأمان.")}
+ const actual=previous&&Number.isSafeInteger(previous.revision)?previous.revision:0;
+ if(actual!==savedRevision){
+   locked=true;throw Error("اللعبة اتغيّرت من تبويب ثاني. حتى ما نضيّع الكلمات وقفنا الحفظ.");
+ }
+ const nextRevision=actual+1;
+ state.revision=nextRevision;
+ try{
+   localStorage.setItem(KEY,JSON.stringify(state));
+   const checked=safeParse(localStorage.getItem(KEY));
+   const ownerAfter=lockInfo();
+   if(!checked||checked.revision!==nextRevision||ownerAfter&&ownerAfter.tab!==tabId){
+     locked=true;throw Error("صار تضارب بالحفظ؛ افتح آخر نسخة محفوظة قبل ما تكمل.");
+   }
+   savedRevision=nextRevision;storageOk=true;
+ }catch(e){storageOk=false;throw Error("تعذّر حفظ اللعبة: "+(e.message||"مساحة المتصفح ممتلئة"))}
 }
 function legacyCycle(){try{return safeParse(localStorage.getItem("imposterCycleV3"))}catch{return null}}
 function legacyScores(){try{return safeParse(localStorage.getItem("imposterScores"))}catch{return null}}
 function load(){
  const saved=(()=>{try{return safeParse(localStorage.getItem(KEY))}catch{return null}})();
+ savedRevision=saved&&Number.isSafeInteger(saved.revision)?saved.revision:0;
  state=core.initial(bank,saved,legacyCycle(),legacyScores());
- if(!locked)persist(); // Persist normalized state and re-hide secret cards after refresh.
+ if(!locked)persist(); // Migrate once, and re-hide a revealed card before anyone sees the screen.
  mode=state.active?"game":"setup";
 }
 function rootError(msg){
  if(!app)return;
- app.innerHTML='<div class="panel"><h2 tabindex="-1">تعذّر تحميل اللعبة</h2><p>'+esc(msg||"ملفات اللعبة ما تحمّلت بشكل صحيح")+'</p><button type="button" onclick="location.reload()">إعادة المحاولة</button></div>';
+ app.innerHTML='<div class="panel"><h2 tabindex="-1">تعذّر تحميل اللعبة</h2><p>'+esc(msg||"ملفات اللعبة ما تحمّلت بشكل صحيح")+'</p><button type="button" id="reloadGame">إعادة المحاولة</button></div>';
+ app.querySelector("#reloadGame")?.addEventListener?.("click",()=>root.location.reload());
 }
 if(!app)return;
 if(!core||!bank){rootError("افحص الاتصال بالإنترنت وحاول تحدث الصفحة. إذا كنت تستعملها أول مرة، افتحها مع الإنترنت.");return}
@@ -61,7 +78,9 @@ try{core.catalogue(bank);takeOwnership(false);load()}
 catch(e){rootError("معلومات اللعبة المحفوظة غير صالحة. جرّب إعادة التحميل. "+e.message);return}
 function show(text){notice=text;render()}
 function commit(next){
- state=next;persist();mode=state.active?"game":"setup";remainingPrev=-1;render();
+ const old=state;state=next;
+ try{persist()}catch(e){state=old;throw e}
+ mode=state.active?"game":"setup";remainingPrev=-1;render();
 }
 function commitError(fn){
  try{fn()}catch(e){show(e.message||"صار خطأ غير متوقع")}
@@ -92,6 +111,8 @@ function setupView(){
  '<span class="pill">'+state.roster.length+' لاعبين</span><div class="stack">'+rosterInput()+'</div>'+
  htmlButton("يلا نبدأ","start")+
  htmlButton("مراجعة الكلمات","review","secondary")+
+ htmlButton("تصدير نسخة احتياطية","export","secondary")+
+ '<label for="backupFile">استرجاع نسخة احتياطية (ملف JSON)</label><input id="backupFile" type="file" accept=".json,application/json">'+
  htmlButton("تصفير النقاط","clearScores","secondary")+
  scoreBoard()+
  '<p class="muted">ماكو حساب. الحفظ على جهازك فقط. الدخيل +٣ إذا عرف الكلمة، وبقية اللاعبين +٢ إذا ما عرفها.</p>');
@@ -117,11 +138,14 @@ function talkView(a){
  '<div class="ask-pair"><strong>'+esc(activeName(a.asker))+'</strong><span>يسأل</span><strong>'+esc(activeName(a.target))+'</strong></div>'+
  '<p>اسأله عن الكلمة بدون ما تنطقها. انتبه للإجابات!</p>'+
  '<div id="clock" class="secret timer" aria-label="الوقت المتبقي">'+formatSeconds(left)+'</div>';
- if(expired)content+='<p class="notice">خلص الوقت. اختاروا إذا تكملون دقيقة أو تروحون للتخمين.</p>'+
+ const minimum=state.roster.length,completed=a.askTurn>=minimum;
+ if(expired)content+='<p class="notice" role="status">خلص الوقت. اختاروا إذا تكملون دقيقة أو تروحون للتخمين.</p>'+
  htmlButton("نكمل دقيقة","extend","secondary");
  else content+=htmlButton("السؤال التالي","nextQuestion");
- content+=htmlButton("إنهاء السوالف والتخمين","endDiscussion","secondary")+
- htmlButton("إلغاء الجولة","abandon","quiet");
+ content+='<p class="muted">الأسئلة: '+a.askTurn+' / '+minimum+' قبل التخمين الاعتيادي</p>';
+ if(completed||expired)content+=htmlButton("إنهاء السوالف والتخمين","endDiscussion","secondary");
+ else content+=htmlButton("إنهاء مبكر (تجاوز المضيف)","forceEnd","quiet");
+ content+=htmlButton("إلغاء الجولة","abandon","quiet");
  panel(content);
 }
 function guessPassView(a){
@@ -141,10 +165,19 @@ function resultView(a){
 }
 function reviewView(){
  const byCat=bank.categories.map(c=>{
- const body=c.groups.map(group=>'<div class="word-grid">'+group.words.map(word=>{
- const excluded=state.blocked.includes(word);
- return '<button type="button" class="word-chip '+(excluded?"excluded":"")+'" data-action="toggleWord" data-word="'+esc(word)+'" aria-pressed="'+excluded+'">'+esc(word)+(excluded?" ×":" ✓")+'</button>';
- }).join("")+'</div>').join("");
+ const body=c.groups.map((group,index)=>{
+   const chips=group.words.map(word=>{
+     const excluded=state.blocked.includes(word);
+     return '<button type="button" class="word-chip '+(excluded?"excluded":"")+'" data-action="toggleWord" data-word="'+esc(word)+'" aria-pressed="'+excluded+'">'+esc(word)+(excluded?" ×":" ✓")+'</button>';
+   }).join("");
+   const examples=group.words.filter(w=>bank.wordQuestions?.[w]).map(word=>
+     '<details><summary>أسئلة خاصة لتدقيق: '+esc(word)+'</summary><ol class="review-questions">'+bank.wordQuestions[word].map(q=>'<li>'+esc(q)+'</li>').join("")+'</ol></details>'
+   ).join("");
+   return '<section class="word-group"><h3>مجموعة '+(index+1)+' — '+group.words.length+' كلمات</h3>'+
+      '<div class="word-grid">'+chips+'</div>'+
+      '<details><summary>التلميحات الآمنة وأسئلة النقاش</summary><p class="muted">تلميحات عامة تنطبق على أكثر من خيار:</p><ul class="review-questions">'+group.hints.map(h=>'<li>'+esc(h)+'</li>').join("")+'</ul>'+
+      '<p class="muted">١٠ أسئلة محتملة للمجموعة:</p><ol class="review-questions">'+group.questionAngles.map(q=>'<li>'+esc(q)+'</li>').join("")+'</ol></details>'+examples+'</section>';
+ }).join("");
  return '<details><summary>'+esc(c.name)+' ('+c.groups.reduce((n,g)=>n+g.words.length,0)+')</summary>'+body+'</details>';
  }).join("");
  panel('<h2 tabindex="-1">مراجعة الكلمات</h2><p>اضغط أي كلمة حتى توقف ظهورها، واضغط مرة ثانية حتى ترجع. المجموعة تحتاج ٦ كلمات على الأقل حتى تدخل بالاختيار.</p>'+
@@ -180,19 +213,37 @@ function readNames(){
 }
 function saveRoster(){
  if(state.active)return true;
- const list=readNames();
+ const list=readNames(),previous=state;
  try{
   state=core.updateRoster(state,list);
-  const legacy=legacyScores();
-  if(legacy&&typeof legacy==="object"&&!Array.isArray(legacy)){
-   for(const p of state.roster){
-    if(!state.scores[p.id]&&Object.hasOwn(legacy,p.name)&&Number.isFinite(legacy[p.name])){
-      state.scores[p.id]=Math.max(0,Math.floor(legacy[p.name]));
-    }
-   }
-  }
+  // Legacy migration happens ONLY on the initial V4 load, never on a zero score.
   persist();return true;
- }catch(e){notice=e.message;render();return false}
+ }catch(e){state=previous;notice=e.message;render();return false}
+}
+function exportBackup(){
+ if(!saveRoster())return;
+ const payload={format:"iraqi-imposter-v4-save",exportedAt:new Date().toISOString(),state};
+ const blob=new Blob([JSON.stringify(payload,null,2)],{type:"application/json;charset=utf-8"});
+ const uri=root.URL.createObjectURL(blob),anchor=document.createElement("a");
+ anchor.href=uri;anchor.download="imposter-backup-"+new Date().toISOString().slice(0,10)+".json";
+ document.body.appendChild(anchor);anchor.click();anchor.remove();
+ root.setTimeout(()=>root.URL.revokeObjectURL(uri),1000);
+ notice="حفظنا نسخة ملف على جهازك. احتفظ بيها بمكان آمن لأنها تتضمن أسماء اللاعبين.";
+ render();
+}
+async function importBackup(file){
+ if(locked||state.active){show("خلّص الجولة الحالية قبل ما تسترجع نسخة.");return}
+ if(!file||file.size>2000000){show("ملف الحفظ لازم يكون JSON وحجمه أقل من ٢ ميگابايت.");return}
+ try{
+   const text=await file.text();
+   const parsed=JSON.parse(text);
+   if(parsed?.format!=="iraqi-imposter-v4-save"||parsed.state?.version!==core.VERSION)throw Error("صيغة الملف مو مطابقة.");
+   const next=core.initial(bank,parsed.state,null,null);
+   if(!root.confirm("راح تستبدل الأسماء والنقاط والكلمات الحالية بالنسخة المسترجعة. متأكد؟"))return;
+   next.revision=savedRevision;commit(next);
+   notice="تم استرجاع النسخة وحفظها على جهازك.";
+   render();
+ }catch(e){show("فشل استرجاع الملف: "+(e.message||"ملف غير صالح"))}
 }
 function handle(action,target){
  if(locked){
@@ -224,7 +275,11 @@ function handle(action,target){
     commit(core.nextQuestion(state,rand));break;
   }
   case "endDiscussion":{
-    if(!root.confirm("متأكد تريدون تنهّون السوالف وتسلّمون التلفون للدخيل؟"))return;
+    if(!root.confirm("خلصت السوالف؟ هسه تخمين الدخيل."))return;
+    commit(core.endDiscussion(state,false,Date.now()));break;
+  }
+  case "forceEnd":{
+    if(!root.confirm("هذا تجاوز مبكر من المضيف؛ بعدكم ما سألتوا كل اللاعبين. متأكدون؟"))return;
     commit(core.endDiscussion(state,true,Date.now()));break;
   }
   case "extend":{
@@ -249,9 +304,16 @@ function handle(action,target){
     state.scores=Object.fromEntries(state.roster.map(p=>[p.id,0]));persist();render();break;
   }
   case "review":if(!saveRoster())return;mode="review";render();break;
+  case "export":exportBackup();break;
   case "toggleWord":{
-    const word=target.getAttribute("data-word");
-    commit(core.filterWord(state,bank,word,!state.blocked.includes(word)));
+    const word=target.getAttribute("data-word"),exclude=!state.blocked.includes(word);
+    const before=core.remaining(state,bank,"عشوائي");
+    const changed=core.filterWord(state,bank,word,exclude);
+    const after=core.remaining(changed,bank,"عشوائي");
+    const affected=Math.abs(before-after);
+    if(exclude&&affected>1&&!root.confirm("إيقاف «"+word+"» راح يوقف "+affected+" كلمات بهالمجموعة لأن التخمين يحتاج ٦ خيارات. تكمل؟"))return;
+    notice=exclude?"تم إيقاف "+affected+" كلمات مرتبطة بالمجموعة.":"رجعت "+Math.max(0,after-before)+" كلمات متاحة.";
+    commit(changed);
     mode="review";render();break;
   }
   case "backSetup":mode="setup";render();break;
@@ -267,6 +329,9 @@ app.addEventListener("click",event=>{
  commitError(()=>handle(target.getAttribute("data-action"),target));
 });
 app.addEventListener("change",event=>{
+ if(event.target.id==="backupFile"){
+   importBackup(event.target.files?.[0]);return;
+ }
  if(locked||state.active)return;
  if(event.target.id==="cat"){
   state.category=event.target.value;persist();render();
@@ -285,7 +350,18 @@ root.addEventListener("storage",event=>{
   if(owner&&owner.tab!==tabId){locked=true;render()}
  }
 });
-root.addEventListener("pageshow",()=>{if(!locked)takeOwnership(false);render()});
+root.addEventListener("pagehide",()=>{
+ try{if(lockInfo()?.tab===tabId)localStorage.removeItem(LOCK_KEY)}catch(e){}
+});
+root.addEventListener("pageshow",()=>{
+ if(!locked){
+   if(takeOwnership(false)){
+     // A browser back/forward cache restore must reload a session updated by another document.
+     try{load()}catch(e){notice=e.message;locked=true}
+   }
+ }
+ render();
+});
 document.addEventListener("visibilitychange",()=>{if(!document.hidden&&state?.active?.phase==="talk")render()});
 root.setInterval(()=>{
  if(locked)return;

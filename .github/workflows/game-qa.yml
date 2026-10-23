@@ -3,8 +3,11 @@ on:
   pull_request:
     branches: [main]
   push:
-    branches: [main, fix/audit-gameplay-hardening-20261023]
+    branches: [main]
   workflow_dispatch:
+concurrency:
+  group: game-qa-${{ github.ref }}
+  cancel-in-progress: true
 permissions:
   contents: read
 jobs:
@@ -23,7 +26,7 @@ jobs:
           node --check word-bank.js
           node --check sw.js
       - name: Run game regression tests
-        run: node --test tests/test-game.js tests/test-ui.js
+        run: node --test tests/test-game.js tests/test-ui.js tests/test-offline.js
 
   browser-smoke:
     runs-on: ubuntu-latest
@@ -39,3 +42,43 @@ jobs:
           npx playwright install chromium
       - name: Test actual browser gameplay at 320–1280px, recovery and offline
         run: node tests/browser-smoke.js
+
+  webkit-smoke:
+    name: Browser compatibility — WebKit (additional confidence)
+    continue-on-error: true
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    container: mcr.microsoft.com/playwright:v1.56.1-noble
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install matching Playwright test package
+        run: npm install --no-save playwright@1.56.1
+      - name: Test Arabic small screens, backup, recovery and offline in WebKit
+        env:
+          TEST_BROWSER: webkit
+        run: node tests/browser-smoke.js
+  publish:
+    name: Publish only after complete QA
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: [test, browser-smoke]
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/configure-pages@v5
+      - name: Stage verified public site files
+        run: |
+          mkdir -p site
+          cp index.html style.css app.js game-core.js word-bank.js sw.js icon.svg manifest.webmanifest site/
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+      - id: deployment
+        uses: actions/deploy-pages@v4
