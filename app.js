@@ -135,11 +135,14 @@ function talkView(a){
  '<div class="ask-pair"><strong>'+esc(activeName(a.asker))+'</strong><span>يسأل</span><strong>'+esc(activeName(a.target))+'</strong></div>'+
  '<p>اسأله عن الكلمة بدون ما تنطقها. انتبه للإجابات!</p>'+
  '<div id="clock" class="secret timer" aria-label="الوقت المتبقي">'+formatSeconds(left)+'</div>';
- if(expired)content+='<p class="notice">خلص الوقت. اختاروا إذا تكملون دقيقة أو تروحون للتخمين.</p>'+
+ const minimum=state.roster.length,completed=a.askTurn>=minimum;
+ if(expired)content+='<p class="notice" role="status">خلص الوقت. اختاروا إذا تكملون دقيقة أو تروحون للتخمين.</p>'+
  htmlButton("نكمل دقيقة","extend","secondary");
  else content+=htmlButton("السؤال التالي","nextQuestion");
- content+=htmlButton("إنهاء السوالف والتخمين","endDiscussion","secondary")+
- htmlButton("إلغاء الجولة","abandon","quiet");
+ content+='<p class="muted">الأسئلة: '+a.askTurn+' / '+minimum+' قبل التخمين الاعتيادي</p>';
+ if(completed||expired)content+=htmlButton("إنهاء السوالف والتخمين","endDiscussion","secondary");
+ else content+=htmlButton("إنهاء مبكر (تجاوز المضيف)","forceEnd","quiet");
+ content+=htmlButton("إلغاء الجولة","abandon","quiet");
  panel(content);
 }
 function guessPassView(a){
@@ -235,7 +238,11 @@ function handle(action,target){
     commit(core.nextQuestion(state,rand));break;
   }
   case "endDiscussion":{
-    if(!root.confirm("متأكد تريدون تنهّون السوالف وتسلّمون التلفون للدخيل؟"))return;
+    if(!root.confirm("خلصت السوالف؟ هسه تخمين الدخيل."))return;
+    commit(core.endDiscussion(state,false,Date.now()));break;
+  }
+  case "forceEnd":{
+    if(!root.confirm("هذا تجاوز مبكر من المضيف؛ بعدكم ما سألتوا كل اللاعبين. متأكدون؟"))return;
     commit(core.endDiscussion(state,true,Date.now()));break;
   }
   case "extend":{
@@ -261,8 +268,14 @@ function handle(action,target){
   }
   case "review":if(!saveRoster())return;mode="review";render();break;
   case "toggleWord":{
-    const word=target.getAttribute("data-word");
-    commit(core.filterWord(state,bank,word,!state.blocked.includes(word)));
+    const word=target.getAttribute("data-word"),exclude=!state.blocked.includes(word);
+    const before=core.remaining(state,bank,"عشوائي");
+    const changed=core.filterWord(state,bank,word,exclude);
+    const after=core.remaining(changed,bank,"عشوائي");
+    const affected=Math.abs(before-after);
+    if(exclude&&affected>1&&!root.confirm("إيقاف «"+word+"» راح يوقف "+affected+" كلمات بهالمجموعة لأن التخمين يحتاج ٦ خيارات. تكمل؟"))return;
+    notice=exclude?"تم إيقاف "+affected+" كلمات مرتبطة بالمجموعة.":"رجعت "+Math.max(0,after-before)+" كلمات متاحة.";
+    commit(changed);
     mode="review";render();break;
   }
   case "backSetup":mode="setup";render();break;
@@ -296,7 +309,18 @@ root.addEventListener("storage",event=>{
   if(owner&&owner.tab!==tabId){locked=true;render()}
  }
 });
-root.addEventListener("pageshow",()=>{if(!locked)takeOwnership(false);render()});
+root.addEventListener("pagehide",()=>{
+ try{if(lockInfo()?.tab===tabId)localStorage.removeItem(LOCK_KEY)}catch(e){}
+});
+root.addEventListener("pageshow",()=>{
+ if(!locked){
+   if(takeOwnership(false)){
+     // A browser back/forward cache restore must reload a session updated by another document.
+     try{load()}catch(e){notice=e.message;locked=true}
+   }
+ }
+ render();
+});
 document.addEventListener("visibilitychange",()=>{if(!document.hidden&&state?.active?.phase==="talk")render()});
 root.setInterval(()=>{
  if(locked)return;
