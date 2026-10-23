@@ -1,0 +1,26 @@
+name: Game QA
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main, fix/audit-gameplay-hardening-20261023]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Validate JavaScript syntax
+        run: |
+          node --check game-core.js
+          node --check app.js
+          node --check word-bank.js
+          node --check sw.js
+      - name: Run game regression tests
+        run: node --test tests/test-game.js
