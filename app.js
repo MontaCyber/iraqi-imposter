@@ -69,7 +69,8 @@ function load(){
 }
 function rootError(msg){
  if(!app)return;
- app.innerHTML='<div class="panel"><h2 tabindex="-1">تعذّر تحميل اللعبة</h2><p>'+esc(msg||"ملفات اللعبة ما تحمّلت بشكل صحيح")+'</p><button type="button" onclick="location.reload()">إعادة المحاولة</button></div>';
+ app.innerHTML='<div class="panel"><h2 tabindex="-1">تعذّر تحميل اللعبة</h2><p>'+esc(msg||"ملفات اللعبة ما تحمّلت بشكل صحيح")+'</p><button type="button" id="reloadGame">إعادة المحاولة</button></div>';
+ app.querySelector("#reloadGame")?.addEventListener("click",()=>root.location.reload());
 }
 if(!app)return;
 if(!core||!bank){rootError("افحص الاتصال بالإنترنت وحاول تحدث الصفحة. إذا كنت تستعملها أول مرة، افتحها مع الإنترنت.");return}
@@ -110,6 +111,8 @@ function setupView(){
  '<span class="pill">'+state.roster.length+' لاعبين</span><div class="stack">'+rosterInput()+'</div>'+
  htmlButton("يلا نبدأ","start")+
  htmlButton("مراجعة الكلمات","review","secondary")+
+ htmlButton("تصدير نسخة احتياطية","export","secondary")+
+ '<label for="backupFile">استرجاع نسخة احتياطية (ملف JSON)</label><input id="backupFile" type="file" accept=".json,application/json">'+
  htmlButton("تصفير النقاط","clearScores","secondary")+
  scoreBoard()+
  '<p class="muted">ماكو حساب. الحفظ على جهازك فقط. الدخيل +٣ إذا عرف الكلمة، وبقية اللاعبين +٢ إذا ما عرفها.</p>');
@@ -208,6 +211,31 @@ function saveRoster(){
   persist();return true;
  }catch(e){state=previous;notice=e.message;render();return false}
 }
+function exportBackup(){
+ if(!saveRoster())return;
+ const payload={format:"iraqi-imposter-v4-save",exportedAt:new Date().toISOString(),state};
+ const blob=new Blob([JSON.stringify(payload,null,2)],{type:"application/json;charset=utf-8"});
+ const uri=root.URL.createObjectURL(blob),anchor=document.createElement("a");
+ anchor.href=uri;anchor.download="imposter-backup-"+new Date().toISOString().slice(0,10)+".json";
+ document.body.appendChild(anchor);anchor.click();anchor.remove();
+ root.setTimeout(()=>root.URL.revokeObjectURL(uri),1000);
+ notice="حفظنا نسخة ملف على جهازك. احتفظ بيها بمكان آمن لأنها تتضمن أسماء اللاعبين.";
+ render();
+}
+async function importBackup(file){
+ if(locked||state.active){show("خلّص الجولة الحالية قبل ما تسترجع نسخة.");return}
+ if(!file||file.size>2000000){show("ملف الحفظ لازم يكون JSON وحجمه أقل من ٢ ميگابايت.");return}
+ try{
+   const text=await file.text();
+   const parsed=JSON.parse(text);
+   if(parsed?.format!=="iraqi-imposter-v4-save"||parsed.state?.version!==core.VERSION)throw Error("صيغة الملف مو مطابقة.");
+   const next=core.initial(bank,parsed.state,null,null);
+   if(!root.confirm("راح تستبدل الأسماء والنقاط والكلمات الحالية بالنسخة المسترجعة. متأكد؟"))return;
+   next.revision=savedRevision;commit(next);
+   notice="تم استرجاع النسخة وحفظها على جهازك.";
+   render();
+ }catch(e){show("فشل استرجاع الملف: "+(e.message||"ملف غير صالح"))}
+}
 function handle(action,target){
  if(locked){
   if(action==="retryLock"||action==="takeLock"){
@@ -267,6 +295,7 @@ function handle(action,target){
     state.scores=Object.fromEntries(state.roster.map(p=>[p.id,0]));persist();render();break;
   }
   case "review":if(!saveRoster())return;mode="review";render();break;
+  case "export":exportBackup();break;
   case "toggleWord":{
     const word=target.getAttribute("data-word"),exclude=!state.blocked.includes(word);
     const before=core.remaining(state,bank,"عشوائي");
@@ -291,6 +320,9 @@ app.addEventListener("click",event=>{
  commitError(()=>handle(target.getAttribute("data-action"),target));
 });
 app.addEventListener("change",event=>{
+ if(event.target.id==="backupFile"){
+   importBackup(event.target.files?.[0]);return;
+ }
  if(locked||state.active)return;
  if(event.target.id==="cat"){
   state.category=event.target.value;persist();render();
