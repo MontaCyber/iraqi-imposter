@@ -7,7 +7,32 @@ const bank=window.IMPOSTER_BANK;
 if(!bank||!Array.isArray(bank.categories))throw Error('Word bank unavailable');
 const groups=Object.fromEntries(bank.categories.map(c=>[c.name,c.groups]));
 const allWords=bank.categories.flatMap(c=>c.groups.flatMap(g=>g.words));
-const $=document.getElementById('app');let playerCount=5;let names=Array.from({length:5},(_,i)=>'اللاعب '+(i+1)),cat='عشوائي',round=0,word='',spy=0,turn=0,seen=false,votes=[],voter=0,seconds=180,timer=null;const keys=Object.keys(groups);const rand=n=>{if(globalThis.crypto?.getRandomValues){let a=new Uint32Array(1),limit=Math.floor(4294967296/n)*n;do{crypto.getRandomValues(a)}while(a[0]>=limit);return a[0]%n}return Math.floor(Math.random()*n)};let spyBag=[],spyBagSize=0,lastSpy=-1;function nextSpy(){if(spyBagSize!==playerCount){spyBag=[];spyBagSize=playerCount;lastSpy=-1}if(!spyBag.length){spyBag=Array.from({length:playerCount},(_,i)=>i);for(let i=spyBag.length-1;i>0;i--){let j=rand(i+1);[spyBag[i],spyBag[j]]=[spyBag[j],spyBag[i]]}if(spyBag.length>1&&spyBag[spyBag.length-1]===lastSpy){let j=rand(spyBag.length-1);[spyBag[j],spyBag[spyBag.length-1]]=[spyBag[spyBag.length-1],spyBag[j]]}}lastSpy=spyBag.pop();return lastSpy}let lastSpies=[];let scores={};try{scores=JSON.parse(localStorage.getItem('imposterScores')||'{}')}catch(e){}let pickedCategory='',guessOptions=[],found=false,roundHint='',spyQuestions=[],askQueue=[],asker=-1,asked=-1,lastAsker=-1,lastPair='',askTurn=0;const CYCLE_KEY='imposterCycleV3';
+const $=document.getElementById('app');let playerCount=5;let names=Array.from({length:5},(_,i)=>'اللاعب '+(i+1)),cat='عشوائي',round=0,word='',spy=0,turn=0,seen=false,votes=[],voter=0,seconds=180,timer=null;const keys=Object.keys(groups);const rand=n=>{if(globalThis.crypto?.getRandomValues){let a=new Uint32Array(1),limit=Math.floor(4294967296/n)*n;do{crypto.getRandomValues(a)}while(a[0]>=limit);return a[0]%n}return Math.floor(Math.random()*n)};let spyCounts=[],spyBagSize=0,lastSpy=-1,spyRecent=[];
+function weightedChoice(items,weightFn){
+  let total=0;
+  const weights=items.map(item=>{const weight=Math.max(0,weightFn(item));total+=weight;return weight});
+  if(total<=0)return items[rand(items.length)];
+  let draw=(rand(1000000)/1000000)*total;
+  for(let i=0;i<items.length;i++){draw-=weights[i];if(draw<0)return items[i]}
+  return items[items.length-1];
+}
+function nextSpy(){
+  if(spyBagSize!==playerCount){
+    spyBagSize=playerCount;spyCounts=Array(playerCount).fill(0);spyRecent=[];lastSpy=-1;
+  }
+  const low=Math.min(...spyCounts);
+  const candidates=Array.from({length:playerCount},(_,i)=>i).filter(i=>i!==lastSpy);
+  const chosen=weightedChoice(candidates,i=>{
+    let weight=Math.exp(-0.055*(spyCounts[i]-low));
+    if(spyRecent[spyRecent.length-2]===i)weight*=0.55;
+    if(spyRecent[spyRecent.length-3]===i)weight*=0.80;
+    return weight;
+  });
+  spyCounts[chosen]++;spyRecent.push(chosen);
+  if(spyRecent.length>4)spyRecent.shift();
+  lastSpy=chosen;return chosen;
+}
+let lastSpies=[];let scores={};try{scores=JSON.parse(localStorage.getItem('imposterScores')||'{}')}catch(e){}let pickedCategory='',guessOptions=[],found=false,roundHint='',spyQuestions=[],askQueue=[],asker=-1,asked=-1,lastAsker=-1,lastPair='',askTurn=0;const CYCLE_KEY='imposterCycleV3';
 function emptyCycle(){return {used:[],categoryCounts:{},groupCounts:{},recentCategories:[],recentGroups:[],recentQuestions:[]}}
 let cycle=emptyCycle();
 try{const saved=JSON.parse(localStorage.getItem(CYCLE_KEY)||'null');
@@ -23,13 +48,21 @@ function remainingFor(category){const used=new Set(cycle.used);return (category=
 function updateWordCounter(){const el=document.getElementById('wordCounter'),sel=document.getElementById('cat');
 if(el){const c=sel?.value||cat;el.textContent='كلمات جديدة بدون تكرار: '+remainingFor(c)+' / '+(c==='عشوائي'?allWords.length:(groups[c]||[]).flatMap(g=>g.words).length)}}
 function restartWords(){if(!confirm('راح ترجع كل الكلمات للبداية وممكن تتكرر من جديد. متأكد؟'))return;cycle=emptyCycle();saveCycle();setup()}
-function pickLeast(items,counts,history){const lowest=Math.min(...items.map(x=>counts[x]||0));const ties=items.filter(x=>(counts[x]||0)===lowest),fresh=ties.filter(x=>!history.includes(x)),pool=fresh.length?fresh:ties;return pool[rand(pool.length)]}
+function pickSoft(items,counts,history,balancing=0.12){
+  const min=Math.min(...items.map(x=>Number(counts[x]||0)));
+  return weightedChoice(items,x=>{
+    let weight=Math.exp(-balancing*(Number(counts[x]||0)-min));
+    if(history[history.length-1]===x)weight*=0.32;
+    else if(history[history.length-2]===x)weight*=0.72;
+    return weight;
+  });
+}
 function chooseWord(){const used=new Set(cycle.used),allowed=cat==='عشوائي'?keys:[cat];
 const active=allowed.filter(c=>(groups[c]||[]).some(g=>g.words.some(w=>!used.has(w))));
 if(!active.length)return null;
-const category=pickLeast(active,cycle.categoryCounts,cycle.recentCategories.slice(-2));
+const category=pickSoft(active,cycle.categoryCounts,cycle.recentCategories.slice(-2),0.12);
 const available=groups[category].map((group,index)=>({group,index,id:category+':'+index,unused:group.words.filter(w=>!used.has(w))})).filter(g=>g.unused.length);
-const id=pickLeast(available.map(g=>g.id),cycle.groupCounts,cycle.recentGroups.slice(-4));
+const id=pickSoft(available.map(g=>g.id),cycle.groupCounts,cycle.recentGroups.slice(-4),0.10);
 const g=available.find(g=>g.id===id),word=g.unused[rand(g.unused.length)];
 cycle.used.push(word);cycle.categoryCounts[category]=(cycle.categoryCounts[category]||0)+1;
 cycle.groupCounts[id]=(cycle.groupCounts[id]||0)+1;
