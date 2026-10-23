@@ -24,6 +24,8 @@ test("word bank is valid, unique and guesses are drawable",()=>{
   assert.ok(g.words.length>=6);
   assert.ok(g.hints.length>=2);
   assert.ok(g.discussion.length>=2);
+  assert.equal(g.questionAngles.length,10);
+  assert.equal(new Set(g.questionAngles).size,10);
   assert.ok(g.words.every(w=>typeof w==="string"&&w.length>0));
   assert.ok(g.discussion.every(q=>typeof q==="string"&&q.length>0));
  }
